@@ -7,6 +7,7 @@
   "use strict";
 
   var SAVE_KEY = "kaidankai_v3";
+  var BUILD = "сборка 5";
   var TOTAL_ANDON = 100;
   var MAX_WOUNDS = 3;
   var DAYS_PER_KAIDAN = 3;   /* сколько дней даётся на одну историю */
@@ -171,19 +172,57 @@
     return S.news;
   }
 
+  /* ---------- если что-то сломалось ---------- */
+
+  /* Ошибку показываем на экране, а не в консоли: на телефоне консоли нет,
+     и молчание выглядит как «кнопка не нажимается». */
+  window.onerror = function (msg, src, line) {
+    var box = document.getElementById("app");
+    if (!box) return false;
+    box.innerHTML = '<div class="title">Поломка в игре</div>' +
+      '<div class="text death">' + esc(String(msg)) + '\n' + esc(String(src || "")) + ':' + line + '</div>' +
+      '<div class="text">Покажи это сообщение мне — по нему видно, что именно сломалось.\n\n' +
+      'Если ошибка про старые файлы или экран пустой — нажми «Обновить игру»: скорее всего, ' +
+      'в телефоне осталась прежняя сборка из памяти браузера.</div>' +
+      '<button class="restart" onclick="hardReload()">Обновить игру</button>';
+    return false;
+  };
+
+  /* Обновление с чисткой: снимаем офлайн-кэш и перезагружаем страницу заново. */
+  window.hardReload = function () {
+    var done = false;
+    function go() { if (!done) { done = true; location.reload(); } }
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }).catch(function () {});
+      }
+      if ("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations) {
+        navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister(); }));
+        }).then(go).catch(go);
+        setTimeout(go, 900);
+        return;
+      }
+    } catch (e) {}
+    go();
+  };
+
   /* ---------- экраны ---------- */
 
   function screenPrologue() {
     setNight(false);
     app.innerHTML =
       '<h1>Кайданкай</h1>' +
-      '<div class="sub">сто андо́нов · город Кураяма</div>' +
+      '<div class="sub">сто андо́нов · город Кураяма · ' + BUILD + '</div>' +
       '<div class="text fade">' + window.PROLOGUE.intro + '</div>' +
       '<div class="text fade">' + window.PROLOGUE.arrivalCommon + '</div>' +
       '<div class="text fade">' + window.PROLOGUE.toast + '</div>' +
       '<button onclick="toCreate()">Дальше</button>' +
       '<label class="file">Загрузить сохранение<input type="file" accept=".json,application/json"' +
-      ' onchange="loadFile(this)"></label>';
+      ' onchange="loadFile(this)"></label>' +
+      '<button class="wait" onclick="hardReload()">Обновить игру</button>';
     window.scrollTo(0, 0);
   }
 
@@ -471,9 +510,26 @@
     screenCity();
   };
 
+  /* Какие места вообще существуют в этой фазе: те, куда можно прийти
+     от старта по ночным (или дневным) переходам. Ночь открывает одни
+     улицы и закрывает другие, и это не только текст. */
+  function phasePlaces(phase) {
+    var seen = {}, q = [city().start], i;
+    seen[city().start] = true;
+    while (q.length) {
+      var n = city().nodes[q.shift()];
+      if (!n) continue;
+      var links = (phase === "day" ? n.links : n.nightLinks) || [];
+      for (i = 0; i < links.length; i++) {
+        if (city().nodes[links[i]] && !seen[links[i]]) { seen[links[i]] = true; q.push(links[i]); }
+      }
+    }
+    return seen;
+  }
+
   window.waitPhase = function () {
     var toDay = S.phase === "night";
-    var warn = "";
+    var warn = "", note = "";
     S.phase = toDay ? "day" : "night";
     if (toDay) {
       S.day++;
@@ -483,8 +539,23 @@
           "если к утру ни одна история не будет рассказана, они догорят.";
       }
     }
+    /* Смена фазы застаёт тебя там, где ты стоял, но не всякая улица есть в
+       обеих фазах: переулка-щели днём нет, лестницы вниз днём нет. Город
+       выставляет тебя туда, откуда это место открывается. */
+    var exists = phasePlaces(S.phase);
+    if (!exists[S.node]) {
+      var here = city().nodes[S.node] || {};
+      var exits = (S.phase === "day" ? here.links : here.nightLinks) || [];
+      var fit = exits.filter(function (id) { return city().nodes[id] && exists[id]; });
+      if (fit.length) {
+        S.node = fit[Math.floor(Math.random() * fit.length)];
+        note = "Улица, на которой ты стоял, кончилась вместе с " + (toDay ? "ночью" : "днём") +
+          ". Ты выходишь на «" + esc(city().nodes[S.node].name) + "».";
+      }
+    }
     if (Math.random() < 0.45) someoneDies();
     /* предупреждение о сроке важнее городской сводки — оно не должно теряться */
+    if (note) S.news = S.news ? note + " " + S.news : note;
     if (warn) S.news = S.news ? warn + " " + S.news : warn;
     S.screen = "city";
     save();
@@ -716,8 +787,13 @@
   /* Вход: если игра уже начата — продолжаем с того же места, иначе начинаем заново.
      Без этого S остаётся пустым и первая же кнопка не срабатывает. */
   (function boot() {
-    var saved = load();
-    if (saved) { S = saved; render(); return; }
-    newRun();
+    try {
+      var saved = load();
+      if (saved) { S = saved; render(); return; }
+      newRun();
+    } catch (e) {
+      /* пустой экран хуже честной ошибки: показываем её */
+      window.onerror(String((e && e.message) || e), "engine.js", 0);
+    }
   })();
 })();
