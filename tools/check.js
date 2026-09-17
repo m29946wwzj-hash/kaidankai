@@ -101,6 +101,7 @@ for (const k of KAIDANS) {
 
   if (!clears) bad(`${tag}: нет ни одной удачной концовки`);
   if (!k.voice && !(window.VOICES || {})[k.id]) bad(`${tag}: нет голоса — ни поля voice, ни записи в VOICES`);
+  if (!k.house) bad(`${tag}: не указан дом, в котором начинается кайдан`);
 
   // достижимость сцен из start
   const seen = new Set();

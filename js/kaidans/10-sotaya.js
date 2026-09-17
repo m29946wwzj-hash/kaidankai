@@ -6,6 +6,7 @@ window.KAIDANS.push({
   title: "Сотая история",
   where: "perekrestok",
   when: "night",
+  house: "Дом с ирори посреди комнаты и потолочным крюком для котла. Такой в Кураяме один, и он старше города.",
   cond: function (S) {
     var all = window.KAIDANS || [];
     for (var i = 0; i < all.length; i++) {

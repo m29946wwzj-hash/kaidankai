@@ -5,6 +5,7 @@ window.KAIDANS.push({
   title: "Кайдан о лестнице",
   where: "lestnica",
   when: "night",
+  house: "Минка с лазом в земляном полу: под домом начинается подпол, которого нет ни на одном плане города.",
   start: "e1",
   scenes: {
     e1: {

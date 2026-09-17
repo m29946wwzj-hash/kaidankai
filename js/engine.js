@@ -31,6 +31,12 @@
   }
   function heroName() { return (S && S.hero && S.hero.name) || "Безымянный"; }
 
+  /* Короткое имя дома — для кнопки: полное описание остаётся на экране голоса. */
+  function houseShort(k) {
+    if (!k || !k.house) return "";
+    return k.house.split(/[:;.]/)[0].trim();
+  }
+
   /* сколько историй ещё не рассказано этим героем */
   function remaining() {
     return kaidans().filter(function (k) {
@@ -186,7 +192,7 @@
 
     var kbtns = here.map(function (k) {
       return '<button class="kaidan" onclick="startKaidan(\'' + k.id + '\')">' + k.title +
-        '<small>кайдан · провал — смерть</small></button>';
+        '<small>' + esc(houseShort(k)) + ' · провал — смерть</small></button>';
     }).join("");
 
     var ebtns = exits.map(function (id) {
@@ -272,6 +278,8 @@
     var k = K(S.kaidan);
     setNight(S.phase === "night");
     app.innerHTML = bar() + status() +
+      '<div class="loc">' + k.title + '</div>' +
+      (k.house ? '<div class="loc-sub">дом: ' + esc(k.house) + '</div>' : "") +
       '<div class="title voice">Голос</div>' +
       '<div class="text fade">' + window.voiceFor(k) + '</div>' +
       '<button onclick="listenOn()">Слушать дальше</button>';

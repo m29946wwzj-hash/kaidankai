@@ -5,6 +5,7 @@ window.KAIDANS.push({
   title: "Кайдан о тумане",
   where: "reka",
   when: "night",
+  house: "Рыбацкая хижина на сваях: сети висят с потолка, лодка вросла в ил у самого порога.",
   start: "d1",
   scenes: {
     d1: {
