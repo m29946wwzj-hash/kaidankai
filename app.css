@@ -61,6 +61,14 @@ button.wait{color:var(--dim); font-size:14px}
 button.restart{border-color:var(--red); color:var(--red); text-align:center}
 button small{display:block; color:var(--dim); font-size:13px; margin-top:3px}
 
+label.file{
+  display:block; width:100%; text-align:left; cursor:pointer; color:var(--dim);
+  border:1px solid var(--line); border-radius:2px; padding:13px 16px; margin-bottom:9px;
+  font-size:15px; line-height:1.5;
+}
+label.file input{display:none}
+label.file:hover{border-color:var(--acc); color:#fff}
+
 .center{text-align:center}
 .fade{animation:f .55s ease}
 @keyframes f{from{opacity:0}to{opacity:1}}

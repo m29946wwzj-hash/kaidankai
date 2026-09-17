@@ -9,6 +9,7 @@
   var SAVE_KEY = "kaidankai_v3";
   var TOTAL_ANDON = 100;
   var MAX_WOUNDS = 3;
+  var DAYS_PER_KAIDAN = 3;   /* сколько дней даётся на одну историю */
   var app = document.getElementById("app");
   var S = null;
 
@@ -60,8 +61,40 @@
       deck: [],
       gone: [],
       searched: {},
-      news: ""
+      news: "",
+      day: 1,
+      lastClearDay: 1
     };
+  }
+
+  /* Срок: три дня на историю. День идёт, когда герой дожидается утра. */
+  function deadlineDay() { return (S.lastClearDay || 1) + DAYS_PER_KAIDAN; }
+  function daysLeft() { return Math.max(0, deadlineDay() - S.day); }
+
+  /* Ёкаи приходят, когда срок вышел: омомори к этому времени иссякли. */
+  function yokaiCome() {
+    S.omomori = [];
+    S.screen = "yokai";
+    save();
+    screenYokai();
+  }
+
+  function screenYokai() {
+    setNight(true);
+    app.innerHTML = bar() +
+      '<div class="title">Ёкаи пришли</div>' +
+      '<div class="text death fade">Три дня в Кураяме — это три дня без единой рассказанной истории. ' +
+      'За такое не прощают: омомори в кармане делаются тёплыми, потом сухими, потом их нет — ' +
+      'силы в них кончились сами.\n\n' +
+      'Ёкаи идут по улице не спеша. Их видно в окнах домов, мимо которых ты проходил: ' +
+      'у каждого окна стоит по одному, и все смотрят на тебя.\n\n' +
+      'Тебя убивают не в кайдане. Просто на улице, между двумя андо́нами, — так забирают ' +
+      'тех, кто перестал слушать.</div>' +
+      '<div class="text">' + esc(heroName()) + ' больше нет. На его место встал другой — ' +
+      'в городе снова сто. Омомори у нового героя свои, и счёт дней начинается заново.</div>' +
+      '<button class="restart" onclick="comeAgain()">Прийти снова другим</button>' +
+      '<button class="wait" onclick="newRun()">Начать всё сначала</button>';
+    window.scrollTo(0, 0);
   }
 
   function blankHero() {
@@ -104,7 +137,11 @@
     var ph = S.phase === "night"
       ? '<span class="phase n">ночь</span>'
       : '<span class="phase">день</span>';
-    return '<div class="bar"><span class="' + cls + '">андоны · ' + S.andon + '</span>' + ph + '</div>';
+    var dl = daysLeft() <= 1
+      ? '<span class="phase n">срок · ' + daysLeft() + ' дн.</span>'
+      : '<span class="phase">срок · ' + daysLeft() + ' дн.</span>';
+    return '<div class="bar"><span class="' + cls + '">андоны · ' + S.andon + '</span>' +
+      '<span class="phase">день ' + S.day + '</span>' + ph + dl + '</div>';
   }
 
   function status() {
@@ -144,7 +181,9 @@
       '<div class="text fade">' + window.PROLOGUE.intro + '</div>' +
       '<div class="text fade">' + window.PROLOGUE.arrivalCommon + '</div>' +
       '<div class="text fade">' + window.PROLOGUE.toast + '</div>' +
-      '<button onclick="toCreate()">Дальше</button>';
+      '<button onclick="toCreate()">Дальше</button>' +
+      '<label class="file">Загрузить сохранение<input type="file" accept=".json,application/json"' +
+      ' onchange="loadFile(this)"></label>';
     window.scrollTo(0, 0);
   }
 
@@ -223,11 +262,18 @@
       news() +
       kbtns +
       ebtns +
+      '<div class="hint">История держит срок до исхода дня ' + deadlineDay() +
+      '. Расскажешь одну — счёт дням пойдёт заново. Не расскажешь — омомори догорят, и придут ёкаи.</div>' +
       wait +
       search +
       '<div class="row">' +
       '<button class="mini" onclick="openPack()">Рюкзак</button>' +
       '<button class="mini" onclick="openRoster()">Участники</button>' +
+      '</div>' +
+      '<div class="row">' +
+      '<button class="mini" onclick="saveFile()">Сохранить прогресс файлом</button>' +
+      '<label class="file">Загрузить сохранение<input type="file" accept=".json,application/json"' +
+      ' onchange="loadFile(this)"></label>' +
       '</div>' +
       closedLine;
     window.scrollTo(0, 0);
@@ -405,10 +451,11 @@
   window.comeAgain = function () {
     var world = {
       cleared: S.cleared, andon: S.andon, roster: S.roster, deck: S.deck,
-      gone: S.gone, searched: S.searched, phase: S.phase, node: S.node
+      gone: S.gone, searched: S.searched, phase: S.phase, node: S.node, day: S.day
     };
     startFresh();
     for (var k in world) S[k] = world[k];
+    S.lastClearDay = S.day;   /* у нового героя свой срок */
     S.news = "Он умер, а ты пришёл. Никто не спросил, откуда.";
     S.screen = "create";
     save();
@@ -425,8 +472,20 @@
   };
 
   window.waitPhase = function () {
-    S.phase = S.phase === "day" ? "night" : "day";
+    var toDay = S.phase === "night";
+    var warn = "";
+    S.phase = toDay ? "day" : "night";
+    if (toDay) {
+      S.day++;
+      if (daysLeft() === 0) return yokaiCome();
+      if (daysLeft() === 1) {
+        warn = "Омомори в кармане стали тёплыми. До срока — один день: " +
+          "если к утру ни одна история не будет рассказана, они догорят.";
+      }
+    }
     if (Math.random() < 0.45) someoneDies();
+    /* предупреждение о сроке важнее городской сводки — оно не должно теряться */
+    if (warn) S.news = S.news ? warn + " " + S.news : warn;
     S.screen = "city";
     save();
     screenCity();
@@ -483,6 +542,56 @@
     S.screen = "scene";
     save();
     screenScene();
+  };
+
+  /* Сохранение отдельным файлом: переживает чистку браузера и переносится на другое устройство. */
+  window.saveFile = function () {
+    var name = "kaidankai-" + (S.hero.name || "geroy").replace(/[^\wА-Яа-яЁё-]/g, "") +
+      "-den" + S.day + ".json";
+    try {
+      var blob = new Blob([JSON.stringify(S)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+      S.news = "Прогресс сохранён файлом: " + name + ". Его можно открыть на другом устройстве.";
+    } catch (e) {
+      S.news = "Не получилось сохранить файл. Игра всё равно сохраняется сама: закрой и открой заново.";
+    }
+    save();
+    screenCity();
+  };
+
+  window.loadFile = function (input) {
+    var f = input && input.files && input.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      var ok = false;
+      try {
+        var s = JSON.parse(String(r.result));
+        if (s && s.hero && city().nodes[s.node] && s.cleared) {
+          S = s;
+          if (!S.day) { S.day = 1; S.lastClearDay = 1; }
+          if (!S.news) S.news = "";
+          S.news = "Прогресс загружен: " + esc(S.hero.name || "герой") + ", день " + S.day +
+            ", андо́нов " + S.andon + ".";
+          save();
+          render();
+          ok = true;
+        }
+      } catch (e) {}
+      if (!ok) {
+        S.news = "Это не похоже на сохранение Кайданкая.";
+        save();
+        screenCity();
+      }
+      if (input.value) input.value = "";
+    };
+    r.readAsText(f);
   };
 
   window.openPack = function () { S.screen = "pack"; save(); screenPack(); };
@@ -549,6 +658,7 @@
       S.cleared[id] = true;
       S.andon = Math.max(0, S.andon - 1);
       S.phase = S.phase === "day" ? "night" : "day";
+      S.lastClearDay = S.day;   /* история рассказана — срок отсчитывается заново */
       S.kaidan = null;
       S.scene = null;
       if (consume()) {
@@ -589,6 +699,7 @@
     if (S.screen === "clear" && K(S.kaidan) && K(S.kaidan).scenes[S.scene]) {
       return screenClear(K(S.kaidan).scenes[S.scene].t);
     }
+    if (S.screen === "yokai") return screenYokai();
     if (S.screen === "death") return screenDeath("Кайдан остался непройденным.", S.wounds >= MAX_WOUNDS - 1);
     if (S.screen === "end") return screenEnd();
     return screenPrologue();
@@ -602,5 +713,11 @@
     });
   }
 
-  screenPrologue();
+  /* Вход: если игра уже начата — продолжаем с того же места, иначе начинаем заново.
+     Без этого S остаётся пустым и первая же кнопка не срабатывает. */
+  (function boot() {
+    var saved = load();
+    if (saved) { S = saved; render(); return; }
+    newRun();
+  })();
 })();
