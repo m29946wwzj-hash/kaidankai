@@ -20,6 +20,7 @@ global.localStorage = {
 };
 const el = {
   innerHTML: "",
+  value: "",
   classList: { add() {}, remove() {}, toggle() {} }
 };
 global.document = { getElementById: () => el, body: el };
@@ -27,6 +28,10 @@ global.navigator = {};
 global.location = { protocol: "file:" };
 global.scrollTo = () => {};
 
+require(path.join(root, "js", "items.js"));
+require(path.join(root, "js", "roster.js"));
+require(path.join(root, "js", "prologue.js"));
+require(path.join(root, "js", "voices.js"));
 require(path.join(root, "js", "city.js"));
 const kd = path.join(root, "js", "kaidans");
 for (const f of fs.readdirSync(kd).sort()) if (f.endsWith(".js")) require(path.join(kd, f));
@@ -34,6 +39,7 @@ require(path.join(root, "js", "engine.js"));
 
 const CITY = window.CITY;
 const KAIDANS = window.KAIDANS;
+const ORIGINS = window.ORIGINS;
 
 /* ---- обход карты ---- */
 function bfs(from, to, phase) {
@@ -58,7 +64,7 @@ for (const k of KAIDANS) {
 }
 
 const visited = new Set();
-let deaths = 0, clears = 0, stuck = 0;
+let deaths = 0, clears = 0, stuck = 0, burned = 0, exhausted = 0, replacements = 0;
 
 function state() {
   const h = el.innerHTML;
@@ -73,13 +79,28 @@ function currentScene() {
   return "?";
 }
 
+/* новый герой: пролог → имя → вход в город */
+function freshRun(originId) {
+  el.value = "Тест";
+  window.startRun();
+  window.toCreate();
+  window.setOrigin(originId);
+  window.enterCity();
+}
+
 let phase = "day";
 let here = CITY.start;
 
 for (const k of KAIDANS) {
   for (let r = 0; r < RUNS; r++) {
-    window.startRun();
+    freshRun(ORIGINS[r % ORIGINS.length].id);
     phase = "day"; here = CITY.start;
+
+    /* иногда заглядываем в рюкзак и в список участников */
+    if (r % 5 === 0) { window.openPack(); window.backFromScreen(); }
+    if (r % 7 === 0) { window.openRoster(); window.backFromScreen(); }
+    /* набиваем рюкзак, чтобы дотянуться и до вариантов, требующих оружия */
+    for (let i = 0; i < 80; i++) window.searchStreet();
 
     while (phase !== k.when) { window.waitPhase(); phase = phase === "day" ? "night" : "day"; }
     const route = bfs(here, k.where, phase);
@@ -90,15 +111,44 @@ for (const k of KAIDANS) {
 
     let steps = 0;
     for (;;) {
+      const h = el.innerHTML;
+      /* сперва то, что показывается до и вместо сцены */
+      if (h.includes('onclick="listenOn()"')) { window.listenOn(); continue; }
+      if (h.includes('onclick="backFromBurn()"')) { burned++; window.backFromBurn(); continue; }
+
       visited.add(currentScene());
       const st = state();
-      if (st === "death") { deaths++; break; }
-      if (st === "clear") { clears++; window.backToCity(); phase = phase === "day" ? "night" : "day"; break; }
+      if (st === "death") {
+        deaths++;
+        if (h.includes("Силы кончились")) exhausted++;
+        break;
+      }
+      if (st === "clear") {
+        clears++;
+        window.backToCity();
+        phase = phase === "day" ? "night" : "day";
+        if (state() === "death") { deaths++; exhausted++; }
+        break;
+      }
       if (steps++ > 60) { stuck++; break; }
 
       const m = el.innerHTML.match(/onclick="pick\((\d+)\)"/g) || [];
       if (!m.length) { stuck++; break; }
       window.pick(Math.floor(Math.random() * m.length));
+    }
+    /* на первом прогоне каждой истории проверяем саму замену участника */
+    if (r === 0) {
+      const probe = window.makeRoster("Проверка");
+      const world = { roster: probe.roster, deck: probe.deck };
+      const before = world.roster.length;
+      const gone = window.replaceOne(world);
+      if (!gone || world.roster.length !== before) {
+        console.log("замена погибшего ломает состав"); process.exit(1);
+      }
+      if (world.roster.filter((p) => p.name === gone.came).length !== 1) {
+        console.log("пришедший на замену повторяет чужое имя"); process.exit(1);
+      }
+      replacements++;
     }
   }
 }
@@ -110,7 +160,10 @@ for (const k of KAIDANS) {
 }
 
 console.log(`кайданов: ${KAIDANS.length} · сцен: ${total}`);
-console.log(`прогонов: ${KAIDANS.length * RUNS} · смертей: ${deaths} · зачётов: ${clears} · застряло: ${stuck}`);
+console.log(`прогонов: ${KAIDANS.length * RUNS} · смертей: ${deaths} (из них от истощения: ${exhausted}) · ` +
+  `зачётов: ${clears} · сгорело омомори: ${burned} · застряло: ${stuck}`);
+console.log(`замена участников: ${replacements} проверок · ` +
+  `омомори в колоде: ${(window.OMOMORI || []).length} · оружия: ${(window.WEAPONS || []).length}`);
 console.log(`покрытие сцен: ${total - missing.length}/${total}`);
 if (missing.length) console.log("не встретились: " + missing.join(", "));
 if (stuck) { console.log("\nзастряли — где-то нет выхода из сцены"); process.exit(1); }

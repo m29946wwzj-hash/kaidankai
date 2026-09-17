@@ -1,34 +1,84 @@
 /* Кайданкай — движок.
-   Экраны: вход → город → сцена кайдана → провал / зачёт → город.
-   Контент лежит в js/kaidans/*.js, карта — в js/city.js. Здесь только логика. */
+   Экраны: пролог → создание героя → город → голос → сцена → провал / зачёт → город.
+   Контент лежит в js/kaidans/*.js, карта — в js/city.js, предметы — в js/items.js,
+   участники — в js/roster.js. Здесь только логика. */
 
 (function () {
   "use strict";
 
-  var SAVE_KEY = "kaidankai_v2";
-  var TOTAL_CANDLES = 100;
+  var SAVE_KEY = "kaidankai_v3";
+  var TOTAL_ANDON = 100;
+  var MAX_WOUNDS = 3;
   var app = document.getElementById("app");
   var S = null;
 
   function kaidans() { return window.KAIDANS || []; }
   function city() { return window.CITY; }
   function K(id) {
-    for (var i = 0; i < kaidans().length; i++) if (kaidans()[i].id === id) return kaidans()[i];
+    var all = kaidans();
+    for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
     return null;
+  }
+  function omomoriList() { return window.OMOMORI || []; }
+  function weaponsList() { return window.WEAPONS || []; }
+  function findIn(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function heroName() { return (S && S.hero && S.hero.name) || "Безымянный"; }
+
+  /* сколько историй ещё не рассказано этим героем */
+  function remaining() {
+    return kaidans().filter(function (k) {
+      return !S.cleared[k.id] && (!k.cond || k.cond(S));
+    }).length;
   }
 
   /* ---------- состояние ---------- */
 
-  function newRun() {
+  function blankWorld() {
     return {
-      candle: TOTAL_CANDLES,
+      screen: "prologue",
       phase: "day",
       node: city().start,
-      screen: "intro",
       kaidan: null,
       scene: null,
-      cleared: {}
+      prevScene: null,
+      cleared: {},
+      andon: TOTAL_ANDON,
+      roster: [],
+      deck: [],
+      gone: [],
+      searched: {},
+      news: ""
     };
+  }
+
+  function blankHero() {
+    return {
+      hero: { name: "", origin: "" },
+      food: 0, water: 0, meds: 0,
+      wounds: 0,
+      weapons: [],
+      omomori: [],
+      burned: []
+    };
+  }
+
+  function startFresh() {
+    S = blankWorld();
+    var h = blankHero();
+    for (var k in h) S[k] = h[k];
+  }
+
+  function newRun() {
+    startFresh();
+    save();
+    screenPrologue();
   }
 
   function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
@@ -37,18 +87,26 @@
       var raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return null;
       var s = JSON.parse(raw);
-      return (s && s.screen && city().nodes[s.node]) ? s : null;
+      return (s && s.screen && s.hero && city().nodes[s.node]) ? s : null;
     } catch (e) { return null; }
   }
 
   /* ---------- общие куски ---------- */
 
   function bar() {
-    var cls = S.candle <= 10 ? "candles low" : "candles";
+    var cls = S.andon <= 10 ? "candles low" : "candles";
     var ph = S.phase === "night"
       ? '<span class="phase n">ночь</span>'
       : '<span class="phase">день</span>';
-    return '<div class="bar"><span class="' + cls + '">свечей · ' + S.candle + '</span>' + ph + '</div>';
+    return '<div class="bar"><span class="' + cls + '">андоны · ' + S.andon + '</span>' + ph + '</div>';
+  }
+
+  function status() {
+    var parts = ["еда " + S.food, "вода " + S.water, "лекарства " + S.meds];
+    var w = S.wounds > 0 ? "раны " + S.wounds : "без ран";
+    var om = S.omomori.length ? "омомори " + S.omomori.length : "омомори нет";
+    return '<div class="status">' + esc(heroName()) + " · " + parts.join(" · ") +
+      " · " + w + " · " + om + '</div>';
   }
 
   function setNight(on) {
@@ -56,31 +114,64 @@
     else document.body.classList.remove("night");
   }
 
-  function open(id) {
-    var k = K(id);
-    if (!k) return;
-    S.kaidan = id;
-    S.scene = k.start;
-    S.screen = "scene";
-    save();
-    screenScene();
+  function news() {
+    return S.news ? '<div class="news fade">' + S.news + '</div>' : "";
+  }
+
+  /* Кто-то уходит, кто-то приходит — счёт остаётся сотней. */
+  function someoneDies() {
+    var r = window.replaceOne(S);
+    if (!r) return "";
+    S.gone.push(r.gone);
+    S.news = "На дальнем конце полосы погас андо́н: " + esc(r.gone) + " не вернулся. " +
+      "На его место уже встал " + esc(r.came) + " — в городе снова сто.";
+    return S.news;
   }
 
   /* ---------- экраны ---------- */
 
-  function screenIntro() {
+  function screenPrologue() {
     setNight(false);
     app.innerHTML =
       '<h1>Кайданкай</h1>' +
-      '<div class="sub">сто свечей · город Кураяма</div>' +
-      '<div class="text">Есть старая игра: сто свечей, сто страшных историй. После каждой гасят одну свечу. Говорят, когда погаснет последняя, придёт тот, кто ждал этого дольше всех.\n\n' +
-      'Кураяма играет в неё третий год. Ты в городе недавно — и уже должен.\n\n' +
-      'Днём улицы одни, ночью другие. Кайдан берут там, где он открылся. Ошибка в кайдане — смерть, и тогда всё начинается заново для того, кто придёт после тебя.</div>' +
-      '<button onclick="startRun()">Войти в город</button>' +
-      (load() ? '<button onclick="continueRun()">Продолжить</button>' : '');
+      '<div class="sub">сто андо́нов · город Кураяма</div>' +
+      '<div class="text fade">' + window.PROLOGUE.intro + '</div>' +
+      '<div class="text fade">' + window.PROLOGUE.arrivalCommon + '</div>' +
+      '<div class="text fade">' + window.PROLOGUE.toast + '</div>' +
+      '<button onclick="toCreate()">Дальше</button>';
+    window.scrollTo(0, 0);
+  }
+
+  function screenCreate() {
+    setNight(false);
+    var origins = window.ORIGINS.map(function (o) {
+      return '<button class="origin" onclick="setOrigin(\'' + o.id + '\')">' + esc(o.label) +
+        '<small>' + esc(o.short) + '</small></button>';
+    }).join("");
+    app.innerHTML =
+      '<div class="title">Кто ты</div>' +
+      '<div class="text">Назови себя. Настоящее имя или выдуманное — здесь это не проверить.\n\n' +
+      'И вспомни, как ты сюда попал. От этого зависит, что у тебя в карманах.</div>' +
+      '<label class="field">имя<input id="heroName" maxlength="16" placeholder="как тебя звать" value="' +
+      esc(S.hero.name || "") + '"></label>' +
+      '<div class="loc-sub">как ты оказался в Кураяме</div>' +
+      origins;
+    window.scrollTo(0, 0);
+  }
+
+  function screenArrival(o) {
+    setNight(false);
+    app.innerHTML =
+      '<div class="title">' + esc(o.label) + '</div>' +
+      '<div class="text fade">' + o.arrival + '</div>' +
+      '<div class="text fade">' + window.PROLOGUE.toast + '</div>' +
+      '<button onclick="enterCity()">Открыть глаза</button>';
+    window.scrollTo(0, 0);
   }
 
   function screenCity() {
+    /* рассказывать больше нечего — значит, город закрыт */
+    if (remaining() === 0) { S.screen = "end"; save(); return screenEnd(); }
     var node = city().nodes[S.node];
     setNight(S.phase === "night");
 
@@ -112,18 +203,78 @@
       ? '<button class="wait" onclick="waitPhase()">Дождаться ночи</button>'
       : '<button class="wait" onclick="waitPhase()">Дождаться утра</button>';
 
-    var left = kaidans().filter(function (k) {
-      return !S.cleared[k.id] && (!k.cond || k.cond(S));
-    }).length;
+    var key = S.node + "|" + S.phase;
+    var search = S.searched[key]
+      ? '<div class="hint">Здесь уже обыскано.</div>'
+      : '<button class="wait" onclick="searchStreet()">Обыскать улицу</button>';
 
-    app.innerHTML = bar() +
+    var left = remaining();
+
+    app.innerHTML = bar() + status() +
       '<div class="loc">' + node.name + '</div>' +
-      '<div class="loc-sub">' + left + ' кайданов ещё не рассказано</div>' +
+      '<div class="loc-sub">' + left + ' кайданов ещё не рассказано · в городе сто</div>' +
       '<div class="text fade">' + desc + '</div>' +
+      news() +
       kbtns +
       ebtns +
       wait +
+      search +
+      '<div class="row">' +
+      '<button class="mini" onclick="openPack()">Рюкзак</button>' +
+      '<button class="mini" onclick="openRoster()">Участники</button>' +
+      '</div>' +
       closedLine;
+    window.scrollTo(0, 0);
+  }
+
+  function screenPack() {
+    setNight(S.phase === "night");
+    var w = S.weapons.length
+      ? S.weapons.map(function (id) { var x = findIn(weaponsList(), id); return '<li>' + esc(x ? x.name : id) + '</li>'; }).join("")
+      : '<li>пусто</li>';
+    var o = S.omomori.length
+      ? S.omomori.map(function (id) { var x = findIn(omomoriList(), id); return '<li>' + esc(x ? x.name : id) + ' — <i>' + esc(x ? x.note : "") + '</i></li>'; }).join("")
+      : '<li>пусто</li>';
+    var b = S.burned.length
+      ? '<div class="loc-sub">сгорели</div><ul class="plain">' + S.burned.map(function (id) {
+          var x = findIn(omomoriList(), id); return '<li>' + esc(x ? x.name : id) + '</li>';
+        }).join("") + '</ul>'
+      : "";
+    app.innerHTML = bar() + status() +
+      '<div class="title">Рюкзак</div>' +
+      '<div class="text">Оружие выручает в кайданах — с ним открываются варианты, которых без него нет.\n\n' +
+      'Омомори сгорает один раз и уводит от верной смерти. Раны копятся: три — и никакой амулет не поможет.</div>' +
+      '<div class="loc-sub">оружие</div><ul class="plain">' + w + '</ul>' +
+      '<div class="loc-sub">омомори</div><ul class="plain">' + o + '</ul>' +
+      b +
+      '<button onclick="backFromScreen()">Назад</button>';
+    window.scrollTo(0, 0);
+  }
+
+  function screenRoster() {
+    setNight(S.phase === "night");
+    var chips = S.roster.map(function (p) {
+      return '<span class="chip' + (p.hero ? " hero" : "") + '">' + esc(p.name) + '</span>';
+    }).join("");
+    app.innerHTML = bar() + status() +
+      '<div class="title">Участники</div>' +
+      '<div class="text">В Кураяме всегда ровно сто — включая тебя. Ушло с начала: ' + S.gone.length +
+      '. Каждого заменили, и ты не помнишь, кем он был до тебя.\n\n' +
+      'Имена тех, кто ушёл, никто не записывает. Ты записываешь.</div>' +
+      '<div class="chips">' + chips + '</div>' +
+      (S.gone.length ? '<div class="loc-sub">ушли</div><div class="chips">' +
+        S.gone.map(function (n) { return '<span class="chip gone">' + esc(n) + '</span>'; }).join("") + '</div>' : "") +
+      '<button onclick="backFromScreen()">Назад</button>';
+    window.scrollTo(0, 0);
+  }
+
+  function screenVoice() {
+    var k = K(S.kaidan);
+    setNight(S.phase === "night");
+    app.innerHTML = bar() + status() +
+      '<div class="title voice">Голос</div>' +
+      '<div class="text fade">' + window.voiceFor(k) + '</div>' +
+      '<button onclick="listenOn()">Слушать дальше</button>';
     window.scrollTo(0, 0);
   }
 
@@ -132,65 +283,134 @@
     var sc = k.scenes[S.scene];
     setNight(S.phase === "night");
     var choices = sc.c.map(function (c, i) {
+      if (c.need && S.weapons.indexOf(c.need) < 0) {
+        var w = findIn(weaponsList(), c.need);
+        return '<button class="locked" disabled>' + c.t +
+          '<small>нужно: ' + esc(w ? w.name : "оружие") + '</small></button>';
+      }
       return '<button onclick="pick(' + i + ')">' + c.t + '</button>';
     }).join("");
-    app.innerHTML = bar() +
+    app.innerHTML = bar() + status() +
       '<div class="title fade">' + k.title + '</div>' +
       '<div class="text fade">' + sc.t + '</div>' +
       choices;
     window.scrollTo(0, 0);
   }
 
-  function screenDeath(text) {
+  function screenDeath(text, final) {
     setNight(true);
+    var who = esc(heroName());
     app.innerHTML = bar() +
-      '<div class="title">Провал</div>' +
+      '<div class="title">' + (final ? "Всё" : "Провал") + '</div>' +
       '<div class="text death fade">' + text + '</div>' +
-      '<div class="text">В Кураяму войдёт кто-то другой — с сотней свечей и без твоей памяти о том, что здесь было. Ему повезёт больше. Или нет.</div>' +
-      '<button class="restart" onclick="startRun()">Начать заново</button>';
+      '<div class="text">' + who + ' больше нет. На его место встал другой — в городе снова сто, ' +
+      'и андо́ны горят так же ровно, как горели.\n\n' +
+      (final
+        ? 'Раны сложились в три, и это оказалось больше, чем можно вынести.'
+        : 'Кайданы, которые ты прошёл, остаются пройденными: город помнит, кто гасил его огни.') + '</div>' +
+      '<button class="restart" onclick="comeAgain()">Прийти снова другим</button>' +
+      '<button class="wait" onclick="newRun()">Начать всё сначала</button>';
     window.scrollTo(0, 0);
   }
 
   function screenClear(text) {
     setNight(S.phase === "night");
-    app.innerHTML = bar() +
+    app.innerHTML = bar() + status() +
       '<div class="title">Кайдан пройден</div>' +
       '<div class="text fade">' + text + '</div>' +
+      news() +
       '<button onclick="backToCity()">Идти дальше</button>';
+    window.scrollTo(0, 0);
+  }
+
+  function screenBurned(text) {
+    setNight(S.phase === "night");
+    var last = S.burned[S.burned.length - 1];
+    var o = findIn(omomoriList(), last);
+    app.innerHTML = bar() + status() +
+      '<div class="title">Омомори сгорел</div>' +
+      '<div class="text death fade">' + text + '</div>' +
+      '<div class="text">Амулет в твоём кармане стал тёплым, потом горячим, потом его не стало. ' +
+      'Осталась горсть пепла и одна рана — но ты стоишь там же, где стоял до выбора.\n\n' +
+      'Сгорело: ' + esc(o ? o.name : "омомори") + '. Раны: ' + S.wounds + ' из ' + MAX_WOUNDS + '.' +
+      (S.wounds >= MAX_WOUNDS - 1 ? '\n\nСледующая смерть будет последней — это не отговорить.' : '') + '</div>' +
+      '<button onclick="backFromBurn()">Вернуться</button>';
     window.scrollTo(0, 0);
   }
 
   function screenEnd() {
     setNight(true);
     var left = kaidans().length;
-    app.innerHTML = bar() +
+    app.innerHTML = bar() + status() +
       '<div class="title">Пока всё</div>' +
-      '<div class="text fade">Ты прошёл все кайданы, которые есть в этой сборке, — ' + left + ' из ста. Свечей в стене осталось ' + S.candle + '.\n\n' +
-      'В Кураяме стало на ' + left + ' свечей темнее, и это ты погасил их, хотя не зажигал. В самом центре мёртвого города стоит прямоугольник, выложенный чёрным камнем: сто гнёзд, и всё меньше огня в них. Когда погаснет последняя, придёт тот, кто ждёт этого дольше всех.</div>' +
+      '<div class="text fade">Ты прошёл все кайданы, которые есть в этой сборке, — ' + left + ' из ста. ' +
+      'Андо́нов на полосах осталось ' + S.andon + '.\n\n' +
+      'В Кураяме стало на ' + left + ' огней темнее, и это ты погасил их, хотя не зажигал. ' +
+      'Где-то в середине города стоит прямоугольник, выложенный чёрным камнем: сто гнёзд, ' +
+      'и всё меньше огня в них. Когда погаснет последний, придёт тот, кто ждёт этого дольше всех.</div>' +
       '<div class="hint">Дальше — новые истории. Их будет девяносто.</div>' +
-      '<button class="restart" onclick="startRun()">Начать заново</button>';
+      '<button class="restart" onclick="newRun()">Начать заново</button>';
     window.scrollTo(0, 0);
   }
 
   /* ---------- переходы ---------- */
 
-  window.startRun = function () {
-    S = newRun();
+  window.toCreate = function () {
+    S.screen = "create";
+    save();
+    screenCreate();
+  };
+
+  window.setOrigin = function (id) {
+    var inp = document.getElementById("heroName");
+    var typed = inp && inp.value ? String(inp.value).trim() : "";
+    S.hero.name = (typed || "Безымянный").slice(0, 16);
+    S.hero.origin = id;
+    var o = window.originById(id);
+    S._pendingOrigin = id;
+    S.screen = "arrival";
+    save();
+    screenArrival(o);
+  };
+
+  window.enterCity = function () {
+    var o = window.originById(S._pendingOrigin || S.hero.origin);
+    if (!S.roster.length) {
+      var made = window.makeRoster(S.hero.name);
+      S.roster = made.roster;
+      S.deck = made.deck;
+    }
+    S.food += o.food;
+    S.water += o.water;
+    S.meds += o.meds;
+    (o.weapons || []).forEach(function (w) { if (S.weapons.indexOf(w) < 0) S.weapons.push(w); });
+    for (var i = 0; i < (o.omomori || 0); i++) {
+      var free = omomoriList().filter(function (m) { return S.omomori.indexOf(m.id) < 0; });
+      if (free.length) S.omomori.push(free[Math.floor(Math.random() * free.length)].id);
+    }
+    S.news = "Тебя посчитали. Ты — " + esc(S.hero.name) + ", и в городе снова ровно сто.";
     S.screen = "city";
     save();
     screenCity();
   };
 
-  window.continueRun = function () {
-    var s = load();
-    if (!s) return window.startRun();
-    S = s;
-    render();
+  window.comeAgain = function () {
+    var world = {
+      cleared: S.cleared, andon: S.andon, roster: S.roster, deck: S.deck,
+      gone: S.gone, searched: S.searched, phase: S.phase, node: S.node
+    };
+    startFresh();
+    for (var k in world) S[k] = world[k];
+    S.news = "Он умер, а ты пришёл. Никто не спросил, откуда.";
+    S.screen = "create";
+    save();
+    screenCreate();
   };
 
   window.walkTo = function (id) {
     if (!city().nodes[id]) return;
     S.node = id;
+    if (Math.random() < 0.35) someoneDies();
     S.screen = "city";
     save();
     screenCity();
@@ -198,18 +418,81 @@
 
   window.waitPhase = function () {
     S.phase = S.phase === "day" ? "night" : "day";
+    if (Math.random() < 0.45) someoneDies();
     S.screen = "city";
     save();
     screenCity();
   };
 
-  window.startKaidan = function (id) { open(id); };
+  window.searchStreet = function () {
+    var key = S.node + "|" + S.phase;
+    S.searched[key] = true;
+    var loot = window.pickLoot();
+    var line;
+    if (loot.kind === "food") { S.food += loot.amount; line = "Ты нашёл " + loot.text + "."; }
+    else if (loot.kind === "water") { S.water += loot.amount; line = "Ты нашёл " + loot.text + "."; }
+    else if (loot.kind === "meds") { S.meds += loot.amount; line = "Ты нашёл " + loot.text + "."; }
+    else if (loot.kind === "weapon") {
+      var owned = weaponsList().filter(function (w) { return S.weapons.indexOf(w.id) < 0; });
+      if (owned.length) {
+        var w = owned[Math.floor(Math.random() * owned.length)];
+        S.weapons.push(w.id);
+        line = "Ты нашёл " + loot.text + ". Это " + w.name + ".";
+      } else {
+        S.food += 1;
+        line = "Оружия больше не нашлось. Зато нашлась еда.";
+      }
+    } else if (loot.kind === "omomori") {
+      var free = omomoriList().filter(function (m) { return S.omomori.indexOf(m.id) < 0; });
+      if (free.length) {
+        var m = free[Math.floor(Math.random() * free.length)];
+        S.omomori.push(m.id);
+        line = "Ты нашёл " + loot.text + ". Это " + m.name + ".";
+      } else {
+        S.meds += 1;
+        line = "Омомори больше не попадаются. Под подкладкой нашлись таблетки.";
+      }
+    } else {
+      line = "Ты обыскал всё, что можно было обыскать. " + loot.text.charAt(0).toUpperCase() + loot.text.slice(1) + ".";
+    }
+    S.news = line;
+    save();
+    screenCity();
+  };
+
+  window.startKaidan = function (id) {
+    var k = K(id);
+    if (!k) return;
+    S.kaidan = id;
+    S.scene = k.start;
+    S.prevScene = k.start;
+    S.screen = "voice";
+    save();
+    screenVoice();
+  };
+
+  window.listenOn = function () {
+    S.screen = "scene";
+    save();
+    screenScene();
+  };
+
+  window.openPack = function () { S.screen = "pack"; save(); screenPack(); };
+  window.openRoster = function () { S.screen = "roster"; save(); screenRoster(); };
+  window.backFromScreen = function () { S.screen = "city"; save(); screenCity(); };
+  window.backFromBurn = function () {
+    S.screen = "scene";
+    S.scene = S.prevScene;
+    save();
+    screenScene();
+  };
 
   window.pick = function (i) {
     var k = K(S.kaidan);
     var sc = k.scenes[S.scene];
     var c = sc.c[i];
     if (!c) return;
+    S.prevScene = S.scene;
     enter(c.to);
   };
 
@@ -218,44 +501,89 @@
     var sc = k.scenes[id];
     S.scene = id;
 
-    if (sc.end === "death") {
-      S.screen = "death"; save(); return screenDeath(sc.t);
-    }
+    if (sc.end === "death") return die(sc.t);
     if (sc.end === "clear") {
       S.screen = "clear"; save(); return screenClear(sc.t);
     }
     S.screen = "scene"; save(); screenScene();
   }
 
+  function die(text) {
+    if (S.omomori.length && S.wounds < MAX_WOUNDS - 1) {
+      S.burned.push(S.omomori.pop());
+      S.wounds++;
+      S.screen = "burned";
+      save();
+      return screenBurned(text);
+    }
+    S.screen = "death";
+    save();
+    screenDeath(text, S.wounds >= MAX_WOUNDS - 1);
+  }
+
+  /* Истощение: после каждого пройденного кайдана нужна еда и вода. */
+  function consume() {
+    S.food -= 1;
+    S.water -= 1;
+    var lines = [];
+    if (S.food < 0) { S.food = 0; S.wounds++; lines.push("Еды не осталось — ты идёшь на голоде, и это рана."); }
+    if (S.water < 0) { S.water = 0; S.wounds++; lines.push("Воды не осталось — во рту сухо, и это вторая рана."); }
+    if (lines.length) {
+      S.news = lines.join(" ") + " Ран у тебя " + S.wounds + " из " + MAX_WOUNDS + ". " +
+        (S.wounds >= MAX_WOUNDS ? "Больше не выдержать." : "Обыщи улицу, пока не стало поздно.");
+    }
+    return S.wounds >= MAX_WOUNDS;
+  }
+
   window.backToCity = function () {
     var id = S.kaidan;
     if (id && !S.cleared[id]) {
       S.cleared[id] = true;
-      S.candle = Math.max(0, S.candle - 1);
+      S.andon = Math.max(0, S.andon - 1);
       S.phase = S.phase === "day" ? "night" : "day";
+      S.kaidan = null;
+      S.scene = null;
+      if (consume()) {
+        S.screen = "death";
+        save();
+        return screenDeath("Ты гасил огни, пока хватало сил. Силы кончились раньше.", true);
+      }
     }
     S.kaidan = null;
     S.scene = null;
     S.screen = "city";
     save();
 
-    var left = kaidans().filter(function (k) {
-      return !S.cleared[k.id] && (!k.cond || k.cond(S));
-    }).length;
-    if (left === 0) { S.screen = "end"; save(); return screenEnd(); }
+    if (remaining() === 0) { S.screen = "end"; save(); return screenEnd(); }
     screenCity();
   };
 
+  window.startRun = function () { newRun(); };
+
+  window.continueRun = function () {
+    var s = load();
+    if (!s) return newRun();
+    S = s;
+    render();
+  };
+
   function render() {
-    if (!S) return screenIntro();
+    if (!S) return screenPrologue();
+    if (S.screen === "prologue") return screenPrologue();
+    if (S.screen === "create") return screenCreate();
+    if (S.screen === "arrival") return screenArrival(window.originById(S._pendingOrigin || S.hero.origin));
     if (S.screen === "city") return screenCity();
+    if (S.screen === "pack") return screenPack();
+    if (S.screen === "roster") return screenRoster();
+    if (S.screen === "voice") return screenVoice();
     if (S.screen === "scene" && K(S.kaidan) && K(S.kaidan).scenes[S.scene]) return screenScene();
+    if (S.screen === "burned") return screenBurned("Омомори сгорел между тобой и тем, что шло за тобой.");
     if (S.screen === "clear" && K(S.kaidan) && K(S.kaidan).scenes[S.scene]) {
       return screenClear(K(S.kaidan).scenes[S.scene].t);
     }
-    if (S.screen === "death") return screenDeath("Кайдан остался непройденным.");
+    if (S.screen === "death") return screenDeath("Кайдан остался непройденным.", S.wounds >= MAX_WOUNDS - 1);
     if (S.screen === "end") return screenEnd();
-    return screenIntro();
+    return screenPrologue();
   }
 
   /* ---------- офлайн-режим (для установки на iPhone) ---------- */
@@ -266,5 +594,5 @@
     });
   }
 
-  screenIntro();
+  screenPrologue();
 })();
