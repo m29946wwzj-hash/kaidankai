@@ -32,6 +32,8 @@ require(path.join(root, "js", "items.js"));
 require(path.join(root, "js", "roster.js"));
 require(path.join(root, "js", "prologue.js"));
 require(path.join(root, "js", "voices.js"));
+require(path.join(root, "js", "people.js"));
+require(path.join(root, "js", "yokai.js"));
 require(path.join(root, "js", "city.js"));
 const kd = path.join(root, "js", "kaidans");
 for (const f of fs.readdirSync(kd).sort()) if (f.endsWith(".js")) require(path.join(kd, f));
@@ -65,6 +67,7 @@ for (const k of KAIDANS) {
 
 const visited = new Set();
 let deaths = 0, clears = 0, stuck = 0, burned = 0, exhausted = 0, replacements = 0;
+let kills = 0, breaths = 0, misses = 0;
 
 function state() {
   const h = el.innerHTML;
@@ -79,21 +82,29 @@ function currentScene() {
   return "?";
 }
 
-/* новый герой: пролог → имя → вход в город */
-function freshRun(originId) {
+/* новый герой: пролог → имя → пол и возраст → вход в город */
+function freshRun(originId, sex, age) {
   el.value = "Тест";
   window.startRun();
   window.toCreate();
+  window.setSex(sex);
+  window.setAge(age);
   window.setOrigin(originId);
   window.enterCity();
 }
 
+/* сутки идут тремя шагами: день → ночь → полночь → утро нового дня */
+const NEXT = { day: "night", night: "polnoch", polnoch: "day" };
+
 let phase = "day";
 let here = CITY.start;
 
+const SEXES = ["m", "f"];
+const AGES = window.AGES.map((a) => a.id);
+
 for (const k of KAIDANS) {
   for (let r = 0; r < RUNS; r++) {
-    freshRun(ORIGINS[r % ORIGINS.length].id);
+    freshRun(ORIGINS[r % ORIGINS.length].id, SEXES[r % 2], AGES[r % AGES.length]);
     phase = "day"; here = CITY.start;
 
     /* иногда заглядываем в рюкзак и в список участников */
@@ -102,12 +113,25 @@ for (const k of KAIDANS) {
     /* набиваем рюкзак, чтобы дотянуться и до вариантов, требующих оружия */
     for (let i = 0; i < 80; i++) window.searchStreet();
 
-    while (phase !== k.when) { window.waitPhase(); phase = phase === "day" ? "night" : "day"; }
+    /* кайдан начинается только в полночь: днём голос молчит и дом не открывается */
+    if (r % 11 === 0) {
+      window.startKaidan(k.id);
+      if (el.innerHTML.includes('onclick="listenOn()"')) {
+        console.log(`кайдан ${k.id} открылся не в полночь`); process.exit(1);
+      }
+      misses++;
+    }
+
+    while (phase !== "polnoch") { window.waitPhase(); phase = NEXT[phase]; }
     const route = bfs(here, k.where, phase);
-    if (!route) { console.log(`нет дороги к ${k.where} (${k.when})`); process.exit(1); }
+    if (!route) { console.log(`нет дороги к ${k.where} (полночь)`); process.exit(1); }
     for (const n of route) { window.walkTo(n); here = n; }
 
+    /* в полночь голос называет дом — до этого его не видно */
     window.startKaidan(k.id);
+    if (!el.innerHTML.includes('onclick="listenOn()"')) {
+      console.log(`голос не начал кайдан ${k.id} в полночь`); process.exit(1);
+    }
 
     let steps = 0;
     for (;;) {
@@ -115,6 +139,16 @@ for (const k of KAIDANS) {
       /* сперва то, что показывается до и вместо сцены */
       if (h.includes('onclick="listenOn()"')) { window.listenOn(); continue; }
       if (h.includes('onclick="backFromBurn()"')) { burned++; window.backFromBurn(); continue; }
+      /* ёкай забрал человека: описание гибели показывается целиком */
+      if (h.includes('onclick="afterKill()"')) {
+        kills++;
+        if (h.length < 900) { console.log(`гибель в ${k.id} описана слишком коротко`); process.exit(1); }
+        window.afterKill();
+        continue;
+      }
+
+      /* перевод духа: страх спадает, но только один раз за историю */
+      if (r % 3 === 0 && h.includes('onclick="breathe()"')) { breaths++; window.breathe(); continue; }
 
       visited.add(currentScene());
       const st = state();
@@ -126,8 +160,11 @@ for (const k of KAIDANS) {
       if (st === "clear") {
         clears++;
         window.backToCity();
-        phase = phase === "day" ? "night" : "day";
+        phase = NEXT[phase];
         if (state() === "death") { deaths++; exhausted++; }
+        else if (!el.innerHTML.includes('class="phase">день<')) {
+          console.log("после кайдана время суток не сменилось"); process.exit(1);
+        }
         break;
       }
       if (steps++ > 60) { stuck++; break; }
@@ -162,6 +199,8 @@ for (const k of KAIDANS) {
 console.log(`кайданов: ${KAIDANS.length} · сцен: ${total}`);
 console.log(`прогонов: ${KAIDANS.length * RUNS} · смертей: ${deaths} (из них от истощения: ${exhausted}) · ` +
   `зачётов: ${clears} · сгорело омомори: ${burned} · застряло: ${stuck}`);
+console.log(`ёкай забрал человека: ${kills} · переводов духа: ${breaths} · ` +
+  `попыток начать кайдан не в полночь: ${misses} (все отбиты)`);
 console.log(`замена участников: ${replacements} проверок · ` +
   `омомори в колоде: ${(window.OMOMORI || []).length} · оружия: ${(window.WEAPONS || []).length}`);
 console.log(`покрытие сцен: ${total - missing.length}/${total}`);

@@ -17,6 +17,8 @@ require(path.join(root, "js", "items.js"));
 require(path.join(root, "js", "roster.js"));
 require(path.join(root, "js", "prologue.js"));
 require(path.join(root, "js", "voices.js"));
+require(path.join(root, "js", "people.js"));
+require(path.join(root, "js", "yokai.js"));
 require(path.join(root, "js", "city.js"));
 for (const f of fs.readdirSync(kaidanDir).sort()) {
   if (f.endsWith(".js")) require(path.join(kaidanDir, f));
@@ -48,6 +50,7 @@ const reach = { day: reachable("day"), night: reachable("night") };
 /* ---- карта ---- */
 for (const [id, n] of Object.entries(CITY.nodes)) {
   if (!n.name || !n.day || !n.night) bad(`узел «${id}»: нет name/day/night`);
+  if (!n.polnoch) bad(`узел «${id}»: нет описания на полночь`);
   for (const ph of ["links", "nightLinks"]) {
     for (const t of n[ph] || []) if (!CITY.nodes[t]) bad(`узел «${id}»: ${ph} → неизвестное «${t}»`);
   }
@@ -65,8 +68,15 @@ for (const k of KAIDANS) {
   ids.add(k.id);
   if (!k.title) bad(`${tag}: нет title`);
   if (!CITY.nodes[k.where]) bad(`${tag}: место «${k.where}» не существует`);
-  else if (!reach[k.when] || !reach[k.when].has(k.where)) {
-    bad(`${tag}: место «${k.where}» недостижимо в фазе «${k.when}»`);
+  else {
+    if (!reach[k.when] || !reach[k.when].has(k.where)) {
+      bad(`${tag}: место «${k.where}» недостижимо в фазе «${k.when}»`);
+    }
+    // кайданы начинаются в полночь, а полночь ходит по ночным улицам:
+    // место обязано быть достижимым ночью, иначе история недостижима вообще
+    if (!reach.night.has(k.where)) {
+      bad(`${tag}: место «${k.where}» недостижимо в полночь (ночная карта)`);
+    }
   }
   if (k.when !== "day" && k.when !== "night") bad(`${tag}: when = «${k.when}»`);
   if (!k.scenes) { bad(`${tag}: нет сцен`); continue; }
@@ -162,6 +172,84 @@ for (const o of window.ORIGINS || []) {
   }
   for (const w of o.weapons || []) if (!WEAPON_IDS.has(w)) bad(`ORIGINS «${o.id}»: нет оружия «${w}»`);
 }
+/* ---- пол и возраст героя ---- */
+uniqueIds(window.SEXES, "SEXES");
+if ((window.SEXES || []).length < 2) bad("SEXES: меньше двух вариантов пола");
+for (const s of window.SEXES || []) if (!s.label || !s.short) bad(`SEXES «${s.id}»: нет label/short`);
+if (!(window.SEXES || []).some((s) => s.id === "f")) bad("SEXES: нет женского варианта");
+if (!(window.SEXES || []).some((s) => s.id === "m")) bad("SEXES: нет мужского варианта");
+
+uniqueIds(window.AGES, "AGES");
+if ((window.AGES || []).length < 2) bad("AGES: меньше двух вариантов возраста");
+for (const a of window.AGES || []) {
+  if (!a.label || !a.short || !a.line) bad(`AGES «${a.id}»: нет label/short/line`);
+  if (!(a.fear > 0)) bad(`AGES «${a.id}»: страх за шаг = ${a.fear}`);
+  if (!(a.wounds >= 2)) bad(`AGES «${a.id}»: предел ран = ${a.wounds}, нужно хотя бы 2`);
+  for (const f of ["food", "water", "meds", "omomori"]) {
+    if (a[f] !== undefined && (typeof a[f] !== "number" || a[f] < 0)) bad(`AGES «${a.id}»: ${f} = ${a[f]}`);
+  }
+}
+if (typeof window.sexById !== "function" || !window.sexById("f").id) bad("нет sexById");
+if (typeof window.ageById !== "function" || !window.ageById("pozhiloy").id) bad("нет ageById");
+
+/* ---- страх, ёкаи, гибель человека ---- */
+if (!(window.FEAR_MAX >= 2)) bad(`FEAR_MAX = ${window.FEAR_MAX}, нужно хотя бы 2`);
+for (let lvl = 1; lvl < window.FEAR_MAX; lvl++) {
+  const arr = (window.TENSION || {})[lvl];
+  if (!Array.isArray(arr) || !arr.length) bad(`TENSION: нет строк для страха ${lvl}`);
+}
+if (!(window.KILLS || []).length) bad("KILLS: нет ни одного описания гибели");
+for (let i = 0; i < (window.KILLS || []).length; i++) {
+  const text = window.yokaiKill("Проверка", i);
+  if (!text || text.length < 400) bad(`KILLS[${i}]: описание гибели короткое или пустое`);
+  for (const must of ["Проверка"]) {
+    if (!text.includes(must)) bad(`KILLS[${i}]: в описании нет имени погибшего`);
+  }
+}
+if (!window.tensionLine(1, "проба")) bad("tensionLine не отдаёт строку");
+if (!(window.streetDeath || []).length) bad("streetDeath: пусто");
+
+/* ---- люди в городе ---- */
+for (const id of Object.keys(CITY.nodes)) {
+  const p = (window.PRESENCE || {})[id];
+  if (!p) { bad(`PRESENCE: нет людей для места «${id}»`); continue; }
+  for (const ph of ["day", "night", "polnoch"]) {
+    if (!Array.isArray(p[ph]) || !p[ph].length) bad(`PRESENCE «${id}»: нет строк на фазу «${ph}»`);
+  }
+}
+for (const id of Object.keys(window.PRESENCE || {})) {
+  if (!CITY.nodes[id]) bad(`PRESENCE: место «${id}» не существует на карте`);
+}
+/* люди действительно встают в места: состав из движка должен их отдавать */
+{
+  const probeRoster = window.makeRoster("Проверка");
+  const probe = { roster: probeRoster.roster, day: 3 };
+  for (const id of Object.keys(CITY.nodes)) {
+    for (const ph of ["day", "night", "polnoch"]) {
+      const list = window.presentAt(probe, id, ph);
+      if (list.length < 2) bad(`presentAt(«${id}», ${ph}) отдаёт ${list.length} человек, нужно 2–3`);
+      for (const p of list) if (!p.name || !p.line) bad(`presentAt(«${id}», ${ph}): человек без имени или строки`);
+    }
+  }
+  /* один и тот же день — одни и те же люди: экран не должен переставлять их сам */
+  const a = window.presentAt(probe, "dom", "night").map((p) => p.name).join(",");
+  const b = window.presentAt(probe, "dom", "night").map((p) => p.name).join(",");
+  if (a !== b) bad("presentAt: выбор людей не устойчив в пределах дня");
+  /* гибель человека не меняет счёт: на место ушедшего приходит новый */
+  const probe2 = { roster: probeRoster.roster.map((p) => ({ ...p })), deck: probeRoster.deck.slice() };
+  const gone = probe2.roster[1].name;
+  const rep = window.removeFromRoster(probe2, gone);
+  if (!rep) bad("removeFromRoster: не нашёл человека из состава");
+  else {
+    if (rep.gone !== gone) bad("removeFromRoster: ушёл не тот, кого назвали");
+    if (probe2.roster.length !== 100) bad("removeFromRoster: состав изменил размер");
+    if (!probe2.roster.some((p) => p.name === rep.came)) bad("removeFromRoster: новый не попал в состав");
+    const alive = window.aliveNames(probe2);
+    if (alive.includes(gone)) bad("removeFromRoster: ушедший остался среди живых");
+    if (alive.length !== 99) bad(`aliveNames: живых ${alive.length}, а должно быть 99`);
+  }
+}
+
 const allNames = new Set([...(window.NAMES || []), ...(window.RESERVE || [])]);
 if (allNames.size < 120) bad(`имён участников мало: ${allNames.size}, нужно хотя бы 120`);
 const rosterProbe = window.makeRoster("Проверка");

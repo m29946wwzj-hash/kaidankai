@@ -72,3 +72,62 @@ label.file:hover{border-color:var(--acc); color:#fff}
 .center{text-align:center}
 .fade{animation:f .55s ease}
 @keyframes f{from{opacity:0}to{opacity:1}}
+
+/* состояние героя и счёт дней */
+.bar{flex-wrap:wrap; row-gap:4px}
+.status{
+  color:var(--dim); font-size:13px; margin:-14px 0 20px;
+  border-bottom:1px solid var(--line); padding-bottom:12px;
+}
+.fear{color:#b98a5a; white-space:nowrap}
+.fear.high{color:var(--red)}
+
+/* полночь и страх: свет уходит, дыхание сбивается */
+body.tense{background:#08080c}
+body.tense .text{border-left:2px solid #2a1a1a; padding-left:14px}
+.text.tension{color:#b98a5a; font-style:italic}
+.text.calm{color:#7f9a7f}
+
+/* создание героя */
+label.field{
+  display:block; width:100%; color:var(--dim); font-size:13px;
+  letter-spacing:.09em; text-transform:uppercase; margin-bottom:18px;
+}
+label.field input{
+  display:block; width:100%; margin-top:8px; padding:13px 16px;
+  background:transparent; color:var(--fg); border:1px solid var(--line);
+  border-radius:2px; font:inherit; font-size:16px;
+}
+label.field input:focus{outline:none; border-color:var(--acc)}
+.pick,button.origin{display:inline-block; width:auto; margin:0 8px 8px 0; padding:10px 14px}
+.pick.on{border-color:var(--acc); color:#fff; background:#101018}
+.pick small,button.origin small{display:block; font-size:12px; margin-top:2px}
+
+/* кто в городе сейчас */
+.here{margin:22px 0 6px; border-left:2px solid var(--line); padding-left:14px}
+.here .loc-sub{margin-bottom:8px}
+.who{color:var(--fg); font-size:14px; margin-bottom:7px}
+.who b{color:var(--acc); font-weight:normal}
+
+/* сводка города */
+.news{color:var(--lit); font-size:14px; margin-bottom:22px; border-left:2px solid #2a2410; padding-left:14px}
+
+/* мелкие кнопки в ряд */
+.row{display:flex; gap:9px}
+.row>button, .row>label.file{flex:1; margin-bottom:9px}
+button.mini{font-size:13px; color:var(--dim); text-align:center}
+
+/* сноски и списки */
+ul.plain{margin:0 0 22px; padding-left:18px; color:var(--dim); font-size:14px}
+ul.plain li{margin-bottom:5px}
+.chips{margin-bottom:18px}
+.chip{
+  display:inline-block; border:1px solid var(--line); border-radius:2px;
+  padding:5px 9px; margin:0 6px 6px 0; font-size:13px; color:var(--dim);
+}
+.chip.hero{border-color:var(--acc); color:var(--fg)}
+.chip.gone{color:#4c4740; text-decoration:line-through; border-color:#17171c}
+
+button.locked{color:#4c4740; border-color:#17171c; cursor:default}
+button.locked:hover{color:#4c4740; border-color:#17171c; background:transparent}
+.title.voice{color:#8a7fb5}

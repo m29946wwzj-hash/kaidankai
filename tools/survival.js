@@ -29,6 +29,8 @@ require(path.join(root, "js", "items.js"));
 require(path.join(root, "js", "roster.js"));
 require(path.join(root, "js", "prologue.js"));
 require(path.join(root, "js", "voices.js"));
+require(path.join(root, "js", "people.js"));
+require(path.join(root, "js", "yokai.js"));
 require(path.join(root, "js", "city.js"));
 const kd = path.join(root, "js", "kaidans");
 for (const f of fs.readdirSync(kd).sort()) if (f.endsWith(".js")) require(path.join(kd, f));
@@ -42,11 +44,17 @@ const kaidanBtns = () => grabs(/onclick="startKaidan\('([^']+)'\)"/g);
 const exitBtns = () => grabs(/onclick="walkTo\('([^']+)'\)"/g);
 
 let lives = 0, heroes = 0, deaths = 0, clears = 0, exhaustion = 0, amuletSaves = 0, ends = 0, stuck = 0;
+let kills = 0, breaths = 0;
+
+const SEXES = ["m", "f"];
+const AGES = window.AGES.map((a) => a.id);
 
 for (let g = 0; g < GAMES; g++) {
   el.value = "Тест";
   window.startRun();
   window.toCreate();
+  window.setSex(SEXES[g % 2]);
+  window.setAge(AGES[g % AGES.length]);
   window.setOrigin(ORIGINS[g % ORIGINS.length].id);
   window.enterCity();
   lives = 1;
@@ -63,12 +71,17 @@ for (let g = 0; g < GAMES; g++) {
     if (h.includes('onclick="listenOn()"')) { window.listenOn(); continue; }
     if (h.includes('onclick="backFromBurn()"')) { amuletSaves++; window.backFromBurn(); continue; }
     if (h.includes('onclick="backToCity()"')) { clears++; window.backToCity(); continue; }
+    if (h.includes('onclick="afterKill()"')) { kills++; window.afterKill(); continue; }
+    if (h.includes('onclick="breathe()"') && Math.random() < 0.5) { breaths++; window.breathe(); continue; }
     if (h.includes('onclick="comeAgain()"')) {
       deaths++;
-      if (h.includes("три, и это оказалось больше") || h.includes("Силы кончились")) exhaustion++;
+      /* ёкаи приходят за тем, кто три дня не рассказал ни одной истории */
+      if (h.includes("Ёкаи пришли") || h.includes("Раны сложились в предел")) exhaustion++;
       lives++;
       if (lives > 400) { console.log("город не кончается: слишком много смертей"); process.exit(1); }
       window.comeAgain();
+      window.setSex(SEXES[(g + lives) % 2]);
+      window.setAge(AGES[(g + lives) % AGES.length]);
       window.setOrigin(ORIGINS[(g + lives) % ORIGINS.length].id);
       window.enterCity();
       continue;
@@ -106,5 +119,6 @@ for (let g = 0; g < GAMES; g++) {
 console.log(`прохождений: ${GAMES} · героев: ${heroes} · кайданов зачтено: ${clears}`);
 console.log(`смертей: ${deaths} (из них от истощения: ${exhaustion}) · омомори сгорело: ${amuletSaves} · ` +
   `дошли до конца сборки: ${ends} (из ${total} кайданов)`);
+console.log(`ёкай забрал людей: ${kills} · переводов духа: ${breaths}`);
 if (stuck) { console.log(`\nзастряло: ${stuck}`); process.exit(1); }
 console.log("\nгород переживает героев");
