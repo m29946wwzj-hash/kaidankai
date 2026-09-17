@@ -1,7 +1,7 @@
 /* Офлайн-кэш. Нужен, чтобы игра открывалась с домашнего экрана iPhone
    без интернета. Стратегия: отдаём из кэша, в фоне обновляем. */
 
-var CACHE = "kaidankai-v3";
+var CACHE = "kaidankai-v4";
 var CORE = ["./", "./index.html", "./app.css", "./manifest.webmanifest",
             "./js/city.js", "./js/items.js", "./js/roster.js", "./js/prologue.js",
             "./js/voices.js", "./js/engine.js"];
